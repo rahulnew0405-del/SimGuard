@@ -106,6 +106,8 @@ This version fixes it two ways:
    weighted features plus randomness, rather than assigned deterministically.
    Some noise is irreducible, as in a real fraud dataset.
 
+The training data is 16.78% fraud / 83.22% legitimate, and `class_weight="balanced"` is used on the `RandomForestClassifier` to address this imbalance.
+
 Actual numbers, read from `ml/model_meta.json` (10,000 synthetic samples):
 
 | Metric | Value |
