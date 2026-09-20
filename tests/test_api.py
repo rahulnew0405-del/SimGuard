@@ -13,7 +13,7 @@ Setup notes:
 """
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
@@ -33,7 +33,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from auth import create_access_token
-from models import Base, User, Transaction, FraudAlert
+from models import Base, User, Transaction, FraudAlert, LoginAttempt
 
 DEVICE = "device-1"
 CREDS = {"email": "alice@example.com", "phone": "9876543210", "password": "s3cretpass"}
@@ -272,6 +272,69 @@ def test_get_other_users_logins_is_forbidden(env):
     assert r.status_code == 403
     assert isinstance(r.json(), dict) and "detail" in r.json()
     assert client.get(f"/api/user/{uid_a}/logins").status_code == 401
+
+
+# ------------------------------------------------------------------- admin
+
+# Purpose: GET /api/admin/users lists every user with exactly the safe fields,
+# exposes sim_swapped as a bool (not the raw timestamp), and never leaks
+# password_hash.
+def test_admin_users_lists_safe_fields_only(env):
+    client, Session = env
+    uid_a = _register(client).json()["user_id"]
+    _register(client, email="bob@example.com", phone="1112223334")
+    client.post(f"/api/admin/simulate-swap?user_id={uid_a}")
+
+    r = client.get("/api/admin/users")
+    assert r.status_code == 200
+    rows = r.json()
+    assert [u["email"] for u in rows] == [CREDS["email"], "bob@example.com"]
+    for u in rows:
+        assert set(u) == {"id", "email", "phone", "balance", "created_at", "sim_swapped"}
+        assert isinstance(u["sim_swapped"], bool)
+    assert [u["sim_swapped"] for u in rows] == [True, False]
+    assert "password_hash" not in r.text and "$2" not in r.text
+
+
+# Purpose: GET /api/admin/stats on an empty DB returns zeros, and always
+# includes all three action keys so the UI never has to guard for missing ones.
+def test_admin_stats_empty(env):
+    client, _ = env
+    r = client.get("/api/admin/stats")
+    assert r.status_code == 200
+    assert r.json() == {
+        "logins_last_24h": {"ALLOW": 0, "CHALLENGE": 0, "BLOCK": 0},
+        "total_users": 0,
+        "fraud_alerts_total": 0,
+    }
+
+
+# Purpose: stats counts login attempts by action for the last 24h only (a
+# 25-hour-old attempt is excluded), plus total users and total fraud alerts.
+def test_admin_stats_counts_recent_attempts_users_and_alerts(env):
+    client, Session = env
+    uid = _register(client).json()["user_id"]
+    _register(client, email="bob@example.com", phone="1112223334")
+
+    now = datetime.utcnow()
+    db = Session()
+    for action, age_hours in [
+        ("ALLOW", 1), ("ALLOW", 2), ("CHALLENGE", 3), ("BLOCK", 4),
+        ("BLOCK", 25),  # outside the 24h window
+    ]:
+        db.add(LoginAttempt(
+            user_id=uid, action=action, created_at=now - timedelta(hours=age_hours)
+        ))
+    db.add(FraudAlert(user_id=uid, reason="SIM_SWAP_CRITICAL", risk_score=80))
+    db.add(FraudAlert(user_id=uid, reason="UNKNOWN_DEVICE", risk_score=75))
+    db.commit()
+    db.close()
+
+    assert client.get("/api/admin/stats").json() == {
+        "logins_last_24h": {"ALLOW": 2, "CHALLENGE": 1, "BLOCK": 1},
+        "total_users": 2,
+        "fraud_alerts_total": 2,
+    }
 
 
 # Purpose: input validation on the transfer body — non-positive amounts are

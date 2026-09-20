@@ -5,7 +5,7 @@ you should be able to say *why* it's flat here rather than pretend it needs
 to be.
 """
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request
@@ -15,7 +15,7 @@ from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
@@ -238,6 +238,33 @@ def fraud_logs(db: Session = Depends(get_db)):
             "action": r.action, "flags": r.flags, "created_at": r.created_at.isoformat(),
         } for r in rows
     ]
+
+
+@app.get("/api/admin/users")
+def admin_users(db: Session = Depends(get_db)):
+    rows = db.query(User).order_by(User.id).all()
+    return [
+        {
+            "id": u.id, "email": u.email, "phone": u.phone, "balance": u.balance,
+            "created_at": u.created_at.isoformat(),
+            "sim_swapped": u.sim_swapped_at is not None,
+        } for u in rows
+    ]
+
+
+@app.get("/api/admin/stats")
+def admin_stats(db: Session = Depends(get_db)):
+    since = datetime.utcnow() - timedelta(hours=24)
+    counts = dict(
+        db.query(LoginAttempt.action, func.count(LoginAttempt.id))
+        .filter(LoginAttempt.created_at >= since)
+        .group_by(LoginAttempt.action).all()
+    )
+    return {
+        "logins_last_24h": {a: counts.get(a, 0) for a in ("ALLOW", "CHALLENGE", "BLOCK")},
+        "total_users": db.query(User).count(),
+        "fraud_alerts_total": db.query(FraudAlert).count(),
+    }
 
 
 @app.get("/api/admin/model-meta")
