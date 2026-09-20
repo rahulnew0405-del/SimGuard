@@ -213,6 +213,67 @@ def test_transfer_blocked_by_risk_engine(env):
     assert "SIM_SWAP_CRITICAL" in alert.reason
 
 
+# ------------------------------------------------------------------- user
+
+# Purpose: GET /api/user/{id} returns email and balance for the token's own
+# id, and nothing else — in particular no password_hash.
+def test_get_own_user_returns_email_and_balance_only(env):
+    client, _ = env
+    uid = _register(client).json()["user_id"]
+    r = client.get(f"/api/user/{uid}", headers=_auth_header(uid))
+    assert r.status_code == 200
+    assert r.json() == {"email": CREDS["email"], "balance": 50000.0}
+
+
+# Purpose: a valid token for user A must not read user B's data — requesting
+# another id gets 403 (and an unauthenticated request gets 401).
+def test_get_other_users_data_is_forbidden(env):
+    client, _ = env
+    uid_a = _register(client).json()["user_id"]
+    uid_b = _register(
+        client, email="bob@example.com", phone="1112223334"
+    ).json()["user_id"]
+
+    r = client.get(f"/api/user/{uid_b}", headers=_auth_header(uid_a))
+    assert r.status_code == 403
+    assert "email" not in r.json() and "balance" not in r.json()
+    assert client.get(f"/api/user/{uid_a}").status_code == 401
+
+
+# Purpose: GET /api/user/{id}/logins returns only the token owner's attempts —
+# with two users who each logged in, user A sees exactly their own row and
+# none of B's fields leak (no user_id in the payload at all).
+def test_get_own_logins_returns_only_own_attempts(env):
+    client, _ = env
+    uid_a = _register(client).json()["user_id"]
+    _register(client, email="bob@example.com", phone="1112223334")
+    assert _login(client).status_code == 200
+    assert _login(client, email="bob@example.com").status_code == 200
+    assert _login(client, email="bob@example.com").status_code == 200
+
+    r = client.get(f"/api/user/{uid_a}/logins", headers=_auth_header(uid_a))
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 1
+    assert set(rows[0]) == {"risk_score", "level", "action", "flags", "created_at"}
+
+
+# Purpose: a valid token for user A must not read user B's login history —
+# requesting another id gets 403 with no rows (and no token gets 401).
+def test_get_other_users_logins_is_forbidden(env):
+    client, _ = env
+    uid_a = _register(client).json()["user_id"]
+    uid_b = _register(
+        client, email="bob@example.com", phone="1112223334"
+    ).json()["user_id"]
+    assert _login(client, email="bob@example.com").status_code == 200
+
+    r = client.get(f"/api/user/{uid_b}/logins", headers=_auth_header(uid_a))
+    assert r.status_code == 403
+    assert isinstance(r.json(), dict) and "detail" in r.json()
+    assert client.get(f"/api/user/{uid_a}/logins").status_code == 401
+
+
 # Purpose: input validation on the transfer body — non-positive amounts are
 # rejected with 422 (Field(gt=0)) and leave no transaction behind.
 def test_transfer_rejects_non_positive_amount(env):

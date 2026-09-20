@@ -181,6 +181,32 @@ def transfer(
     return {"message": "Transfer completed", "risk": result, "new_balance": user.balance}
 
 
+@app.get("/api/user/{user_id}")
+def get_user(user_id: int, user: User = Depends(get_current_user)):
+    # A token only grants access to its own account.
+    if user.id != user_id:
+        raise HTTPException(403, "Forbidden")
+    return {"email": user.email, "balance": user.balance}
+
+
+@app.get("/api/user/{user_id}/logins")
+def get_user_logins(
+    user_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    if user.id != user_id:
+        raise HTTPException(403, "Forbidden")
+    rows = (
+        db.query(LoginAttempt).filter_by(user_id=user_id)
+        .order_by(LoginAttempt.created_at.desc()).limit(20).all()
+    )
+    return [
+        {
+            "risk_score": r.risk_score, "level": r.risk_level, "action": r.action,
+            "flags": r.flags, "created_at": r.created_at.isoformat(),
+        } for r in rows
+    ]
+
+
 # ---- Admin / demo endpoints ----
 
 @app.post("/api/admin/simulate-swap")
