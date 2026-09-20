@@ -69,6 +69,18 @@ function showTab(tab) {
   document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
 }
 
+// FastAPI returns `detail` as a string for HTTPExceptions (e.g. "Email already
+// registered") but as a list of {loc, msg, type} objects for 422 validation errors.
+function formatError(detail) {
+  if (Array.isArray(detail)) {
+    return detail.map(e => {
+      const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : null;
+      return field ? `${field}: ${e.msg}` : e.msg;
+    }).join('; ');
+  }
+  return detail;
+}
+
 async function doRegister() {
   const body = {
     email: document.getElementById('regEmail').value,
@@ -84,7 +96,7 @@ async function doRegister() {
     el.textContent = `Registered! Your user_id is ${data.user_id} — remember it for the admin panel. Now log in.`;
   } else {
     el.style.background = '#7f1d1d';
-    el.textContent = data.detail || 'Registration failed';
+    el.textContent = formatError(data.detail) || 'Registration failed';
   }
 }
 
@@ -112,7 +124,7 @@ async function doLogin() {
       <div class="flags">Flags: ${risk.flags.join(', ') || 'none'}</div>`;
   } else {
     el.style.background = '#7f1d1d';
-    el.innerHTML = `<b>${data.detail && data.detail.message || data.detail}</b>
+    el.innerHTML = `<b>${data.detail && data.detail.message || formatError(data.detail)}</b>
       ${risk ? `<div class="flags">Risk score: ${risk.score} — Flags: ${risk.flags.join(', ')}</div>` : ''}`;
   }
 }
