@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SimGuard — Admin</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 2rem; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; }
+  .card { background: #1e293b; padding: 1.25rem; border-radius: 10px; margin-bottom: 1rem; }
+  input { padding: .5rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; width: 120px; }
+  button { padding: .5rem 1rem; border: none; border-radius: 6px; background: #6366f1; color: white; font-weight: 600; cursor: pointer; margin-left: .5rem; }
+  button.danger { background: #ef4444; }
+  button.ok { background: #22c55e; }
+  table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .82rem; }
+  th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #334155; }
+  .badge { padding: .15rem .5rem; border-radius: 999px; font-size: .7rem; font-weight: 700; }
+  .LOW { background: #14532d; color: #86efac; }
+  .MEDIUM { background: #78350f; color: #fcd34d; }
+  .HIGH { background: #7f1d1d; color: #fca5a5; }
+  a { color: #818cf8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ SimGuard Admin</h1>
+  <p><a href="/">&larr; back to login</a></p>
+
+  <div class="card">
+    <b>SIM Swap Simulator</b>
+    <p style="font-size:.85rem;color:#94a3b8">Enter the user_id you got when registering, then simulate a SIM swap and try logging in again — the login should now be blocked.</p>
+    <input id="uid" placeholder="user_id" type="number" />
+    <button class="danger" onclick="simulate()">⚡ Simulate SIM Swap</button>
+    <button class="ok" onclick="reset()">✓ Reset</button>
+    <div id="simResult" style="margin-top:.5rem;font-size:.85rem"></div>
+  </div>
+
+  <div class="card">
+    <b>Model performance (from training)</b>
+    <div id="modelMeta" style="font-size:.85rem;margin-top:.5rem">Loading...</div>
+  </div>
+
+  <div class="card">
+    <b>Recent login attempts (fraud log / audit trail)</b>
+    <table id="logsTable">
+      <thead><tr><th>User</th><th>Score</th><th>Level</th><th>Action</th><th>Flags</th><th>When</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+async function simulate() {
+  const uid = document.getElementById('uid').value;
+  const res = await fetch(`/api/admin/simulate-swap?user_id=${uid}`, { method: 'POST' });
+  const data = await res.json();
+  document.getElementById('simResult').textContent = data.message || JSON.stringify(data);
+  loadLogs();
+}
+async function reset() {
+  const uid = document.getElementById('uid').value;
+  const res = await fetch(`/api/admin/reset-swap?user_id=${uid}`, { method: 'POST' });
+  const data = await res.json();
+  document.getElementById('simResult').textContent = data.message || JSON.stringify(data);
+  loadLogs();
+}
+async function loadLogs() {
+  const res = await fetch('/api/admin/fraud-logs');
+  const rows = await res.json();
+  const tbody = document.querySelector('#logsTable tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.user_id}</td>
+      <td>${r.risk_score}</td>
+      <td><span class="badge ${r.level}">${r.level}</span></td>
+      <td>${r.action}</td>
+      <td>${r.flags || ''}</td>
+      <td>${new Date(r.created_at).toLocaleTimeString()}</td>
+    </tr>`).join('');
+}
+async function loadMeta() {
+  const res = await fetch('/api/admin/model-meta');
+  const meta = await res.json();
+  document.getElementById('modelMeta').innerHTML =
+    `Model: ${meta.model} · Test AUC: ${meta.test_auc} · CV AUC: ${meta.cv_auc_mean} (&plusmn;${meta.cv_auc_std}) · Precision: ${meta.precision} · Recall: ${meta.recall} · F1: ${meta.f1}`;
+}
+loadLogs();
+loadMeta();
+setInterval(loadLogs, 4000);
+</script>
+</body>
+</html>

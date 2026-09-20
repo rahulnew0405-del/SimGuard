@@ -1,0 +1,30 @@
+{
+  "features": [
+    "hours_since_sim_swap",
+    "is_known_device",
+    "transaction_amount",
+    "is_external_ip",
+    "login_hour",
+    "failed_attempts_1h",
+    "account_age_days",
+    "txns_last_24h"
+  ],
+  "cv_auc_mean": 0.7466,
+  "cv_auc_std": 0.0151,
+  "test_auc": 0.7805,
+  "precision": 0.4406,
+  "recall": 0.5625,
+  "f1": 0.4941,
+  "feature_importances": {
+    "hours_since_sim_swap": 0.4498,
+    "is_known_device": 0.1363,
+    "transaction_amount": 0.1017,
+    "is_external_ip": 0.0522,
+    "login_hour": 0.0635,
+    "failed_attempts_1h": 0.0327,
+    "account_age_days": 0.1314,
+    "txns_last_24h": 0.0324
+  },
+  "trained_on": "10000 synthetic samples",
+  "model": "RandomForestClassifier"
+}

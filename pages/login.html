@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SimGuard — Login</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .card { background: #1e293b; padding: 2rem; border-radius: 12px; width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  p.sub { color: #94a3b8; margin-top: 0; font-size: .85rem; }
+  input { width: 100%; padding: .6rem; margin: .4rem 0; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; box-sizing: border-box; }
+  button { width: 100%; padding: .6rem; margin-top: .6rem; border: none; border-radius: 6px; background: #6366f1; color: white; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #334155; margin-top: .3rem; }
+  .meter { height: 8px; border-radius: 4px; background: #334155; margin: .8rem 0; overflow: hidden; }
+  .meter-fill { height: 100%; width: 0%; background: #22c55e; transition: width .3s, background .3s; }
+  .result { margin-top: 1rem; padding: .75rem; border-radius: 8px; font-size: .85rem; display: none; }
+  .flags { color: #94a3b8; font-size: .75rem; margin-top: .3rem; }
+  a { color: #818cf8; text-decoration: none; font-size: .8rem; }
+  .tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+  .tabs button { background: #334155; }
+  .tabs button.active { background: #6366f1; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🛡️ SimGuard</h1>
+  <p class="sub">Risk-based authentication demo — login blocks automatically if this account's SIM was recently swapped.</p>
+
+  <div class="tabs">
+    <button id="tabLogin" class="active" onclick="showTab('login')">Login</button>
+    <button id="tabRegister" onclick="showTab('register')">Register</button>
+  </div>
+
+  <div id="loginForm">
+    <input id="loginEmail" placeholder="Email" />
+    <input id="loginPassword" type="password" placeholder="Password" />
+    <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+    <button onclick="doLogin()">Login</button>
+    <div class="result" id="loginResult"></div>
+  </div>
+
+  <div id="registerForm" style="display:none">
+    <input id="regEmail" placeholder="Email" />
+    <input id="regPhone" placeholder="Phone (10 digits)" />
+    <input id="regPassword" type="password" placeholder="Password (min 8 chars)" />
+    <button onclick="doRegister()">Create account</button>
+    <div class="result" id="registerResult"></div>
+  </div>
+
+  <p style="margin-top:1rem"><a href="/static/admin.html">Admin panel — simulate a SIM swap →</a></p>
+</div>
+
+<script>
+// A device_id that persists per browser so "known device" logic has something
+// to key on. In a real bank app this would be a proper device fingerprint.
+function getDeviceId() {
+  let id = localStorage.getItem('simguard_device_id');
+  if (!id) {
+    id = 'dev-' + Math.random().toString(36).slice(2, 12);
+    localStorage.setItem('simguard_device_id', id);
+  }
+  return id;
+}
+
+function showTab(tab) {
+  document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
+  document.getElementById('tabLogin').classList.toggle('active', tab === 'login');
+  document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
+}
+
+async function doRegister() {
+  const body = {
+    email: document.getElementById('regEmail').value,
+    phone: document.getElementById('regPhone').value,
+    password: document.getElementById('regPassword').value,
+  };
+  const res = await fetch('/api/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  const el = document.getElementById('registerResult');
+  el.style.display = 'block';
+  if (res.ok) {
+    el.style.background = '#14532d';
+    el.textContent = `Registered! Your user_id is ${data.user_id} — remember it for the admin panel. Now log in.`;
+  } else {
+    el.style.background = '#7f1d1d';
+    el.textContent = data.detail || 'Registration failed';
+  }
+}
+
+async function doLogin() {
+  const body = {
+    email: document.getElementById('loginEmail').value,
+    password: document.getElementById('loginPassword').value,
+    device_id: getDeviceId(),
+  };
+  const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  const risk = data.risk || (data.detail && data.detail.risk);
+  const el = document.getElementById('loginResult');
+  const fill = document.getElementById('meterFill');
+  el.style.display = 'block';
+
+  if (risk) {
+    fill.style.width = risk.score + '%';
+    fill.style.background = risk.score >= 70 ? '#ef4444' : risk.score >= 35 ? '#f59e0b' : '#22c55e';
+  }
+
+  if (res.ok) {
+    el.style.background = '#14532d';
+    el.innerHTML = `Risk score: <b>${risk.score}</b> (${risk.level}) — ${risk.action}. In a real flow, an OTP screen follows.
+      <div class="flags">Flags: ${risk.flags.join(', ') || 'none'}</div>`;
+  } else {
+    el.style.background = '#7f1d1d';
+    el.innerHTML = `<b>${data.detail && data.detail.message || data.detail}</b>
+      ${risk ? `<div class="flags">Risk score: ${risk.score} — Flags: ${risk.flags.join(', ')}</div>` : ''}`;
+  }
+}
+</script>
+</body>
+</html>
