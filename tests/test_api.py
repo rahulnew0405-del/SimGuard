@@ -404,6 +404,19 @@ def test_verify_otp_expired_token_rejected(env):
     assert Session().query(PendingOtp).count() == 0
 
 
+# Purpose: /api/verify-otp is rate limited to 10/minute per client. The env
+# fixture disables the limiter for every other test, so this one turns it back
+# on (with clean counters): requests 1-10 are handled (401 for a bogus token),
+# and the 11th is rejected with 429 before reaching the route logic.
+def test_verify_otp_is_rate_limited(env):
+    client, _ = env
+    main.limiter.enabled = True
+    main.limiter.reset()
+    codes = [_verify(client, "bogus-token").status_code for _ in range(11)]
+    assert codes[:10] == [401] * 10
+    assert codes[10] == 429
+
+
 # Purpose: the old pattern — verify-otp with a bare user_id — no longer works.
 # The route now requires `token`, so the request is rejected (422) and no JWT
 # is issued for any user_id.

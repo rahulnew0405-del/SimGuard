@@ -156,7 +156,7 @@ Read from `main.py`:
 | GET | `/static/*` | none | serves `pages/` (`login.html`, `dashboard.html`, `admin.html`) |
 | POST | `/api/register` | none | body: `email`, `phone`, `password`; rate limit 5/min |
 | POST | `/api/login` | none | body: `email`, `password`, `device_id`; rate limit 10/min; returns `otp_token` |
-| POST | `/api/verify-otp` | `otp_token` | query: `token`, `otp` (demo: any 6 digits); returns a JWT and `user_id` |
+| POST | `/api/verify-otp` | `otp_token` | query: `token`, `otp` (demo: any 6 digits); rate limit 10/min; returns a JWT and `user_id` |
 | POST | `/api/transfer` | JWT | body: `amount`, `device_id`; rate limit 10/min |
 | GET | `/api/user/{user_id}` | JWT, own id only | returns `email`, `balance`; `403` for another user's id |
 | GET | `/api/user/{user_id}/logins` | JWT, own id only | that user's 20 most recent login attempts |
@@ -174,7 +174,7 @@ Read from `main.py`:
 pytest tests/ -v
 ```
 
-There are currently **46 tests** (they all pass at the time of writing):
+There are currently **47 tests** (they all pass at the time of writing):
 password hashing, JWT tampering, account lockout, the register / login /
 OTP / transfer / user / admin API routes, the risk rules, and the carrier
 client's guard clause. API tests use an in-memory SQLite database per test.

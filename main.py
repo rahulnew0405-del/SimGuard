@@ -151,7 +151,8 @@ def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
 
 
 @app.post("/api/verify-otp")
-def verify_otp(token: str, otp: str, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def verify_otp(request: Request, token: str, otp: str, db: Session = Depends(get_db)):
     # Demo OTP: any 6-digit code is accepted (a real system would text one
     # via an SMS gateway — this app's whole point is that SMS OTP alone is
     # exactly what a SIM-swap attacker can intercept, which is *why* the
