@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SimGuard — Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 2rem; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; }
+  .card { background: #1e293b; padding: 1.25rem; border-radius: 10px; margin-bottom: 1rem; }
+  .balance { font-size: 2rem; font-weight: 700; margin: .25rem 0; }
+  .sub { color: #94a3b8; font-size: .85rem; }
+  button { padding: .5rem 1rem; border: none; border-radius: 6px; background: #334155; color: white; font-weight: 600; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .82rem; }
+  th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #334155; }
+  .badge { padding: .15rem .5rem; border-radius: 999px; font-size: .7rem; font-weight: 700; }
+  .LOW { background: #14532d; color: #86efac; }
+  .MEDIUM { background: #78350f; color: #fcd34d; }
+  .HIGH { background: #7f1d1d; color: #fca5a5; }
+  a { color: #818cf8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ SimGuard Dashboard</h1>
+  <p><a href="/static/admin.html">Admin panel →</a></p>
+
+  <div class="card">
+    <div class="sub" id="who">Loading...</div>
+    <div class="balance" id="balance">&nbsp;</div>
+    <button onclick="logout()">Log out</button>
+  </div>
+
+  <div class="card">
+    <b>Your recent login attempts</b>
+    <div class="sub" style="margin-top:.25rem">Your 20 most recent attempts.</div>
+    <table id="logsTable">
+      <thead><tr><th>Score</th><th>Level</th><th>Action</th><th>Flags</th><th>When</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="sub" id="noLogs" style="display:none;margin-top:.5rem">No recent login attempts.</div>
+  </div>
+</div>
+
+<script>
+// The token and user_id are stored by the OTP step on the login page.
+const token = localStorage.getItem('simguard_token');
+const userId = localStorage.getItem('simguard_user_id');
+
+function logout() {
+  localStorage.removeItem('simguard_token');
+  localStorage.removeItem('simguard_user_id');
+  window.location.href = '/';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+async function loadUser() {
+  const res = await fetch(`/api/user/${userId}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401 || res.status === 403) { logout(); return; }  // expired / invalid token
+  const data = await res.json();
+  document.getElementById('who').textContent = `Signed in as ${data.email} (user_id ${userId})`;
+  document.getElementById('balance').textContent = '₹' + Number(data.balance).toLocaleString();
+}
+
+async function loadLogs() {
+  const res = await fetch(`/api/user/${userId}/logins`, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401 || res.status === 403) { logout(); return; }  // expired / invalid token
+  const rows = await res.json();
+  const tbody = document.querySelector('#logsTable tbody');
+  document.getElementById('noLogs').style.display = rows.length ? 'none' : 'block';
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(r.risk_score)}</td>
+      <td><span class="badge ${esc(r.level)}">${esc(r.level)}</span></td>
+      <td>${esc(r.action)}</td>
+      <td>${esc(r.flags)}</td>
+      <td>${esc(new Date(r.created_at).toLocaleString())}</td>
+    </tr>`).join('');
+}
+
+if (!token || !userId) {
+  window.location.href = '/';
+} else {
+  loadUser();
+  loadLogs();
+  setInterval(loadLogs, 5000);
+}
+</script>
+</body>
+</html>

@@ -37,6 +37,11 @@
     <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
     <button onclick="doLogin()">Login</button>
     <div class="result" id="loginResult"></div>
+    <div id="otpBox" style="display:none">
+      <input id="otpInput" placeholder="6-digit OTP (demo: any 6 digits)" maxlength="6" inputmode="numeric" />
+      <button onclick="doVerifyOtp()">Verify OTP</button>
+      <div class="result" id="otpResult"></div>
+    </div>
   </div>
 
   <div id="registerForm" style="display:none">
@@ -100,6 +105,25 @@ async function doRegister() {
   }
 }
 
+// user_id from the last successful password + risk check; the OTP step needs it.
+let pendingUserId = null;
+
+async function doVerifyOtp() {
+  const otp = document.getElementById('otpInput').value;
+  const res = await fetch(`/api/verify-otp?user_id=${pendingUserId}&otp=${encodeURIComponent(otp)}`, { method: 'POST' });
+  const data = await res.json();
+  const el = document.getElementById('otpResult');
+  el.style.display = 'block';
+  if (res.ok) {
+    localStorage.setItem('simguard_token', data.access_token);
+    localStorage.setItem('simguard_user_id', String(pendingUserId));
+    window.location.href = '/static/dashboard.html';
+  } else {
+    el.style.background = '#7f1d1d';
+    el.textContent = formatError(data.detail) || 'OTP verification failed';
+  }
+}
+
 async function doLogin() {
   const body = {
     email: document.getElementById('loginEmail').value,
@@ -112,6 +136,8 @@ async function doLogin() {
   const el = document.getElementById('loginResult');
   const fill = document.getElementById('meterFill');
   el.style.display = 'block';
+  document.getElementById('otpBox').style.display = 'none';
+  pendingUserId = null;
 
   if (risk) {
     fill.style.width = risk.score + '%';
@@ -120,8 +146,10 @@ async function doLogin() {
 
   if (res.ok) {
     el.style.background = '#14532d';
-    el.innerHTML = `Risk score: <b>${risk.score}</b> (${risk.level}) — ${risk.action}. In a real flow, an OTP screen follows.
+    el.innerHTML = `Risk score: <b>${risk.score}</b> (${risk.level}) — ${risk.action}. Enter the OTP to continue.
       <div class="flags">Flags: ${risk.flags.join(', ') || 'none'}</div>`;
+    pendingUserId = data.user_id;
+    document.getElementById('otpBox').style.display = 'block';
   } else {
     el.style.background = '#7f1d1d';
     el.innerHTML = `<b>${data.detail && data.detail.message || formatError(data.detail)}</b>
