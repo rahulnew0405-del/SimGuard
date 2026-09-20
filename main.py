@@ -49,6 +49,43 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.mount("/static", StaticFiles(directory="pages"), name="static")
 
+# ---- Security headers on every response ----
+# The CSP matches what pages/ actually does: everything is same-origin (own
+# HTML, inline <style>/<script>, fetch() to /api/*), nothing loads from a CDN.
+# 'unsafe-inline' is needed because the pages use inline <script>/<style>
+# blocks, onclick= handlers and style= attributes; that weakens the script-src
+# XSS protection. Moving JS/CSS into static files (and onclick -> addEventListener)
+# would let this drop 'unsafe-inline'.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "0",  # deprecated; explicitly disabled rather than relied on
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+}
+# FastAPI's built-in docs pages load Swagger UI from a CDN, which this CSP
+# would block, so they keep the other headers but not the CSP.
+CSP_EXEMPT_PATHS = ("/docs", "/redoc")
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers[name] = value
+    if request.url.path not in CSP_EXEMPT_PATHS:
+        response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    return response
+
 
 # ---- Request/response schemas (Pydantic does input validation here) ----
 class RegisterIn(BaseModel):

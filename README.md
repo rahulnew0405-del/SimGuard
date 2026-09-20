@@ -168,13 +168,23 @@ Read from `main.py`:
 | GET | `/api/admin/model-meta` | none | contents of `ml/model_meta.json` |
 | GET | `/api/health` | none | `{"status": "ok"}` |
 
+FastAPI's interactive API docs (Swagger UI) are served at `/docs`.
+
+Every response carries security headers set by a middleware in `main.py`:
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`X-XSS-Protection: 0` (deprecated, explicitly disabled), `Referrer-Policy:
+strict-origin-when-cross-origin`, and a same-origin `Content-Security-Policy`
+(`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`,
+`object-src 'none'`). `/docs` and `/redoc` keep the other headers but are
+exempt from the CSP, because Swagger UI loads from a CDN.
+
 ## Tests
 
 ```powershell
 pytest tests/ -v
 ```
 
-There are currently **47 tests** (they all pass at the time of writing):
+There are currently **49 tests** (they all pass at the time of writing):
 password hashing, JWT tampering, account lockout, the register / login /
 OTP / transfer / user / admin API routes, the risk rules, and the carrier
 client's guard clause. API tests use an in-memory SQLite database per test.
@@ -202,5 +212,10 @@ client's guard clause. API tests use an in-memory SQLite database per test.
   into `risk_engine.py`** or `main.py`. Today the SIM-swap signal is
   `User.sim_swapped_at`, set by the admin simulate-swap endpoint. Unconfigured,
   `check_sim_swap()` raises `NotImplementedError`.
+- **The CSP allows `'unsafe-inline'` for scripts and styles.** The pages use
+  inline `<script>`/`<style>` blocks, `onclick=` handlers and `style=`
+  attributes, so a stricter policy would break them. That weakens the CSP's
+  protection against injected scripts. Moving the JS and CSS into static files
+  (and replacing `onclick` with event listeners) would let it be removed.
 - **The ML model is trained on synthetic data**, so its metrics say little
   about real-world fraud detection (see above).

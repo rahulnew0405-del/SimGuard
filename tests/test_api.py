@@ -404,6 +404,52 @@ def test_verify_otp_expired_token_rejected(env):
     assert Session().query(PendingOtp).count() == 0
 
 
+# ------------------------------------------------------------ security headers
+
+EXPECTED_SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-xss-protection": "0",
+    "referrer-policy": "strict-origin-when-cross-origin",
+}
+
+
+# Purpose: every response carries the security headers — a JSON API route, a
+# static HTML page, and error responses (401 from auth, 404 for an unknown
+# path) — and the CSP is same-origin only: no external hosts, framing denied,
+# fetches limited to 'self'.
+def test_security_headers_on_every_response(env):
+    client, _ = env
+    responses = [
+        client.get("/api/health"),                                    # JSON route
+        client.get("/static/login.html"),                             # static page
+        client.post("/api/transfer", json={"amount": 1, "device_id": "d"}),  # 401
+        client.get("/no-such-path"),                                  # 404
+    ]
+    assert [r.status_code for r in responses] == [200, 200, 401, 404]
+    for r in responses:
+        for name, value in EXPECTED_SECURITY_HEADERS.items():
+            assert r.headers.get(name) == value, (r.request.url, name)
+        csp = r.headers["content-security-policy"]
+        assert "default-src 'self'" in csp
+        assert "connect-src 'self'" in csp
+        assert "frame-ancestors 'none'" in csp
+        assert "object-src 'none'" in csp
+        assert "http:" not in csp and "https:" not in csp
+
+
+# Purpose: FastAPI's /docs page loads Swagger UI from a CDN, so it is exempt
+# from the CSP (otherwise it would render blank) but still gets the other
+# headers.
+def test_docs_page_exempt_from_csp_but_has_other_headers(env):
+    client, _ = env
+    r = client.get("/docs")
+    assert r.status_code == 200
+    assert "content-security-policy" not in r.headers
+    for name, value in EXPECTED_SECURITY_HEADERS.items():
+        assert r.headers.get(name) == value
+
+
 # Purpose: /api/verify-otp is rate limited to 10/minute per client. The env
 # fixture disables the limiter for every other test, so this one turns it back
 # on (with clean counters): requests 1-10 are handled (401 for a bogus token),
