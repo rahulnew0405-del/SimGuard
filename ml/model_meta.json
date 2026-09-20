@@ -25,6 +25,12 @@
     "account_age_days": 0.1314,
     "txns_last_24h": 0.0324
   },
+  "class_balance": {
+    "fraud_count": 1678,
+    "legit_count": 8322,
+    "fraud_pct": 16.78,
+    "legit_pct": 83.22
+  },
   "trained_on": "10000 synthetic samples",
   "model": "RandomForestClassifier"
 }

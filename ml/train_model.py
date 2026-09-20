@@ -103,7 +103,11 @@ def generate_data(n=10000):
 def train():
     print("Training SimGuard fraud model...")
     df = generate_data()
-    print(f"Dataset: {len(df)} rows | fraud={df.label.sum()} | legit={(df.label == 0).sum()}")
+    n_fraud = int(df.label.sum())
+    n_legit = int((df.label == 0).sum())
+    fraud_pct = round(100 * n_fraud / len(df), 2)
+    legit_pct = round(100 * n_legit / len(df), 2)
+    print(f"Dataset: {len(df)} rows | fraud={n_fraud} ({fraud_pct}%) | legit={n_legit} ({legit_pct}%)")
 
     X, y = df[FEATURES], df["label"]
     X_train, X_test, y_train, y_test = train_test_split(
@@ -152,6 +156,10 @@ def train():
         "recall": round(recall, 4),
         "f1": round(f1, 4),
         "feature_importances": importances,
+        "class_balance": {
+            "fraud_count": n_fraud, "legit_count": n_legit,
+            "fraud_pct": fraud_pct, "legit_pct": legit_pct,
+        },
         "trained_on": f"{len(df)} synthetic samples",
         "model": "RandomForestClassifier",
     }
