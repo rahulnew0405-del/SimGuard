@@ -92,3 +92,18 @@ class FraudAlert(Base):
     reason = Column(String, nullable=False)
     risk_score = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PendingOtp(Base):
+    """
+    Proof that a user just passed password + risk checks. /api/login issues one
+    of these, and /api/verify-otp must present its opaque token — so the OTP
+    step can't be reached without a successful login. Single use, short-lived.
+    """
+    __tablename__ = "pending_otps"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    token = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)

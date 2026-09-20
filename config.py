@@ -18,6 +18,7 @@ class Settings:
     JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret-change-in-prod")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    OTP_EXPIRE_MINUTES: int = 5  # how long a post-login OTP token stays valid
 
     # Risk thresholds — the boundaries that turn a numeric score into a decision.
     RISK_ALLOW_BELOW: int = 35

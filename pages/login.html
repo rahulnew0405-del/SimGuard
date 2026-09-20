@@ -105,18 +105,19 @@ async function doRegister() {
   }
 }
 
-// user_id from the last successful password + risk check; the OTP step needs it.
-let pendingUserId = null;
+// Opaque token from the last successful password + risk check; the OTP step
+// needs it (the server never accepts a bare user_id there).
+let pendingOtpToken = null;
 
 async function doVerifyOtp() {
   const otp = document.getElementById('otpInput').value;
-  const res = await fetch(`/api/verify-otp?user_id=${pendingUserId}&otp=${encodeURIComponent(otp)}`, { method: 'POST' });
+  const res = await fetch(`/api/verify-otp?token=${encodeURIComponent(pendingOtpToken)}&otp=${encodeURIComponent(otp)}`, { method: 'POST' });
   const data = await res.json();
   const el = document.getElementById('otpResult');
   el.style.display = 'block';
   if (res.ok) {
     localStorage.setItem('simguard_token', data.access_token);
-    localStorage.setItem('simguard_user_id', String(pendingUserId));
+    localStorage.setItem('simguard_user_id', String(data.user_id));
     window.location.href = '/static/dashboard.html';
   } else {
     el.style.background = '#7f1d1d';
@@ -137,7 +138,7 @@ async function doLogin() {
   const fill = document.getElementById('meterFill');
   el.style.display = 'block';
   document.getElementById('otpBox').style.display = 'none';
-  pendingUserId = null;
+  pendingOtpToken = null;
 
   if (risk) {
     fill.style.width = risk.score + '%';
@@ -148,7 +149,7 @@ async function doLogin() {
     el.style.background = '#14532d';
     el.innerHTML = `Risk score: <b>${risk.score}</b> (${risk.level}) — ${risk.action}. Enter the OTP to continue.
       <div class="flags">Flags: ${risk.flags.join(', ') || 'none'}</div>`;
-    pendingUserId = data.user_id;
+    pendingOtpToken = data.otp_token;
     document.getElementById('otpBox').style.display = 'block';
   } else {
     el.style.background = '#7f1d1d';

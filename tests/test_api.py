@@ -33,7 +33,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from auth import create_access_token
-from models import Base, User, Transaction, FraudAlert, LoginAttempt
+from models import Base, User, Transaction, FraudAlert, LoginAttempt, PendingOtp
 
 DEVICE = "device-1"
 CREDS = {"email": "alice@example.com", "phone": "9876543210", "password": "s3cretpass"}
@@ -335,6 +335,107 @@ def test_admin_stats_counts_recent_attempts_users_and_alerts(env):
         "total_users": 2,
         "fraud_alerts_total": 2,
     }
+
+
+# -------------------------------------------------------------------- OTP
+
+def _login_for_otp_token(client):
+    r = _login(client)
+    assert r.status_code == 200
+    return r.json()["otp_token"]
+
+
+def _verify(client, token, otp="123456"):
+    return client.post(f"/api/verify-otp?token={token}&otp={otp}")
+
+
+# Purpose: login (ALLOW/CHALLENGE) returns an opaque otp_token and does NOT
+# expose user_id; presenting that token with a 6-digit OTP succeeds and yields
+# a working JWT for the right user, plus the user_id the dashboard needs.
+def test_verify_otp_with_valid_token_succeeds(env):
+    client, _ = env
+    uid = _register(client).json()["user_id"]
+    body = _login(client).json()
+    assert "user_id" not in body
+    assert len(body["otp_token"]) >= 32
+
+    r = _verify(client, body["otp_token"])
+    assert r.status_code == 200
+    assert r.json()["token_type"] == "bearer"
+    assert r.json()["user_id"] == uid
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    assert client.get(f"/api/user/{uid}", headers=headers).status_code == 200
+
+
+# Purpose: tokens are single-use — the first verify succeeds, and reusing the
+# same token afterwards fails with 401.
+def test_verify_otp_token_is_single_use(env):
+    client, _ = env
+    _register(client)
+    token = _login_for_otp_token(client)
+    assert _verify(client, token).status_code == 200
+    assert _verify(client, token).status_code == 401
+
+
+# Purpose: an unknown token is rejected (401) — this is the bypass fix: you
+# can't get a JWT without having passed login first.
+def test_verify_otp_unknown_token_rejected(env):
+    client, _ = env
+    _register(client)
+    assert _verify(client, "not-a-real-token").status_code == 401
+
+
+# Purpose: an expired token is rejected (401) even with a well-formed OTP,
+# and the stale record is cleaned up. Expiry is simulated by backdating
+# expires_at in the DB.
+def test_verify_otp_expired_token_rejected(env):
+    client, Session = env
+    _register(client)
+    token = _login_for_otp_token(client)
+
+    db = Session()
+    db.query(PendingOtp).filter_by(token=token).one().expires_at = (
+        datetime.utcnow() - timedelta(seconds=1)
+    )
+    db.commit()
+    db.close()
+
+    assert _verify(client, token).status_code == 401
+    assert Session().query(PendingOtp).count() == 0
+
+
+# Purpose: the old pattern — verify-otp with a bare user_id — no longer works.
+# The route now requires `token`, so the request is rejected (422) and no JWT
+# is issued for any user_id.
+def test_verify_otp_old_user_id_pattern_no_longer_works(env):
+    client, _ = env
+    uid = _register(client).json()["user_id"]
+    r = client.post(f"/api/verify-otp?user_id={uid}&otp=123456")
+    assert r.status_code == 422
+    assert "access_token" not in r.text
+
+
+# Purpose: a malformed OTP is a 400 that does NOT burn the token, so the user
+# can retry the OTP; the token is consumed only on success.
+def test_verify_otp_bad_format_keeps_token_usable(env):
+    client, _ = env
+    _register(client)
+    token = _login_for_otp_token(client)
+    assert _verify(client, token, otp="abc").status_code == 400
+    assert _verify(client, token, otp="12345").status_code == 400
+    assert _verify(client, token).status_code == 200
+
+
+# Purpose: a BLOCKED login (recent SIM swap) never issues an OTP token, so a
+# blocked attacker can't reach the OTP step at all.
+def test_blocked_login_creates_no_otp_token(env):
+    client, Session = env
+    uid = _register(client).json()["user_id"]
+    client.post(f"/api/admin/simulate-swap?user_id={uid}")
+    r = _login(client)
+    assert r.status_code == 403
+    assert "otp_token" not in r.text
+    assert Session().query(PendingOtp).count() == 0
 
 
 # Purpose: input validation on the transfer body — non-positive amounts are

@@ -5,6 +5,7 @@ you should be able to say *why* it's flat here rather than pretend it needs
 to be.
 """
 import random
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,7 +20,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
-from models import Base, User, LoginAttempt, Transaction, FraudAlert
+from models import Base, User, LoginAttempt, Transaction, FraudAlert, PendingOtp
 from auth import (
     hash_password, verify_password, create_access_token, decode_token,
     is_account_locked, register_failed_attempt, reset_failed_attempts,
@@ -138,23 +139,43 @@ def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(403, {"message": "Login blocked", "risk": result})
 
+    # Only reached for ALLOW / CHALLENGE. The opaque token is the only way to
+    # get to /api/verify-otp; the client never gets to name a user_id there.
+    otp_token = secrets.token_urlsafe(32)
+    db.add(PendingOtp(
+        user_id=user.id, token=otp_token,
+        expires_at=datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
+    ))
     db.commit()
-    return {"message": "Risk-assessed, OTP required", "risk": result, "user_id": user.id}
+    return {"message": "Risk-assessed, OTP required", "risk": result, "otp_token": otp_token}
 
 
 @app.post("/api/verify-otp")
-def verify_otp(user_id: int, otp: str, db: Session = Depends(get_db)):
+def verify_otp(token: str, otp: str, db: Session = Depends(get_db)):
     # Demo OTP: any 6-digit code is accepted (a real system would text one
     # via an SMS gateway — this app's whole point is that SMS OTP alone is
     # exactly what a SIM-swap attacker can intercept, which is *why* the
     # risk engine exists as a layer in front of it).
+    pending = db.query(PendingOtp).filter_by(token=token).first()
+    if not pending:
+        raise HTTPException(401, "Invalid or expired OTP token")
+    if datetime.utcnow() >= pending.expires_at:
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(401, "Invalid or expired OTP token")
+
+    # A malformed OTP doesn't burn the token; only success or expiry does.
     if len(otp) != 6 or not otp.isdigit():
         raise HTTPException(400, "Invalid OTP format")
-    user = db.query(User).filter_by(id=user_id).first()
+
+    user = db.query(User).filter_by(id=pending.user_id).first()
     if not user:
-        raise HTTPException(404, "User not found")
-    token = create_access_token({"sub": str(user.id)})
-    return {"access_token": token, "token_type": "bearer"}
+        raise HTTPException(401, "Invalid or expired OTP token")
+
+    db.delete(pending)  # single use
+    db.commit()
+    access_token = create_access_token({"sub": str(user.id)})
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}
 
 
 @app.post("/api/transfer")
