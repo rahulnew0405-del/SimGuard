@@ -78,9 +78,11 @@ final_score = min(0.60 * rule_score + 0.40 * (ml_probability * 100), 100)
   score to at least the block threshold (70) regardless of the blend.
 
 Rule points: SIM swap < 2h (+55), < 48h (+35), older (+5); unknown device
-(+15); amount > 50,000 (+10) or > 100,000 (+20); external IP (+8); 3 or more
-failed attempts (+10). Thresholds come from `config.py`: ALLOW below 35, BLOCK
+(+15); amount > 50,000 (+10) or > 100,000 (+20); external IP (+8);
+`IMPOSSIBLE_TRAVEL` (+40); 3 or more failed attempts (+10). Thresholds come from `config.py`: ALLOW below 35, BLOCK
 at 70 or above, CHALLENGE in between.
+
+`IMPOSSIBLE_TRAVEL` is a geo-velocity rule: it fires when the Haversine distance between the last accepted login and the current one (at least 50 km) implies a speed above 900 km/h. `geo_sim.py` uses simulated documentation-range IPs (RFC 5737), not a real GeoIP source, so it can't fire on real traffic; the approach follows the team's literature review reference R8 (Cheruyot et al.), location-based SIM-swap detection.
 
 The model is a `RandomForestClassifier` over 8 features (`hours_since_sim_swap`,
 `is_known_device`, `transaction_amount`, `is_external_ip`, `login_hour`,
@@ -172,7 +174,7 @@ Read from `main.py`:
 pytest tests/ -v
 ```
 
-There are currently **40 tests** (they all pass at the time of writing):
+There are currently **46 tests** (they all pass at the time of writing):
 password hashing, JWT tampering, account lockout, the register / login /
 OTP / transfer / user / admin API routes, the risk rules, and the carrier
 client's guard clause. API tests use an in-memory SQLite database per test.

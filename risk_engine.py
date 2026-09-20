@@ -23,6 +23,14 @@ import joblib
 import pandas as pd
 
 from config import settings
+from geo_sim import haversine_km, lookup_city
+
+# Geo-velocity ("impossible travel") rule. Locations come from geo_sim.py,
+# which is a simulation, not a real GeoIP lookup.
+IMPOSSIBLE_TRAVEL_KMH = 900       # faster than an airliner => not physically plausible
+IMPOSSIBLE_TRAVEL_MIN_KM = 50     # ignore short hops (GeoIP noise, nearby cities)
+IMPOSSIBLE_TRAVEL_POINTS = 40
+_MIN_TRAVEL_HOURS = 1 / 3600      # floor of 1s so same-instant logins can't divide by zero
 
 ML_DIR = os.path.join(os.path.dirname(__file__), "ml")
 MODEL_PATH = os.path.join(ML_DIR, "fraud_model.pkl")
@@ -81,6 +89,12 @@ class RiskEngine:
             rule_score += 8
             flags.append("EXTERNAL_IP")
 
+        # 4b. Geo-velocity: is the jump from the last accepted login location
+        # physically possible in the time that has passed?
+        if self._impossible_travel(user.id, ip, db):
+            rule_score += IMPOSSIBLE_TRAVEL_POINTS
+            flags.append("IMPOSSIBLE_TRAVEL")
+
         # 5. Recent failed attempts
         failed = user.failed_attempts or 0
         if failed >= 3:
@@ -136,6 +150,26 @@ class RiskEngine:
     def _is_external_ip(self, ip: str) -> bool:
         local = ("127.0.0.1", "localhost", "::1", "testclient")
         return ip not in local and not ip.startswith(("10.", "192.168.", "172."))
+
+    def _impossible_travel(self, uid: int, ip: str, db) -> bool:
+        from models import LoginAttempt
+        # Compare against the last *accepted* login: a blocked attempt (say,
+        # an attacker in another city) isn't where the real user was.
+        prev = (
+            db.query(LoginAttempt)
+            .filter(LoginAttempt.user_id == uid, LoginAttempt.success.is_(True))
+            .order_by(LoginAttempt.created_at.desc()).first()
+        )
+        if not prev or not prev.created_at:
+            return False
+        here, there = lookup_city(ip), lookup_city(prev.ip_address)
+        if not here or not there:
+            return False  # unknown location: no signal either way
+        km = haversine_km(here[1], here[2], there[1], there[2])
+        if km < IMPOSSIBLE_TRAVEL_MIN_KM:
+            return False
+        hours = max((datetime.utcnow() - prev.created_at).total_seconds() / 3600, _MIN_TRAVEL_HOURS)
+        return km / hours > IMPOSSIBLE_TRAVEL_KMH
 
     def _account_age(self, user) -> int:
         return max((datetime.utcnow() - user.created_at).days, 1)
