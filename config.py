@@ -23,6 +23,12 @@ class Settings:
     RISK_ALLOW_BELOW: int = 35
     RISK_BLOCK_AT_OR_ABOVE: int = 70
 
+    # Carrier SIM-swap API (see vonage_client.py). Empty = not connected; the
+    # client then raises NotImplementedError instead of calling out.
+    VONAGE_APPLICATION_ID: str = os.getenv("VONAGE_APPLICATION_ID", "")
+    VONAGE_PRIVATE_KEY_PATH: str = os.getenv("VONAGE_PRIVATE_KEY_PATH", "")
+    VONAGE_API_BASE_URL: str = os.getenv("VONAGE_API_BASE_URL", "")
+
     MAX_FAILED_ATTEMPTS: int = 5
     LOCKOUT_MINUTES: int = 15
 
