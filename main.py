@@ -105,6 +105,16 @@ class TransferIn(BaseModel):
     device_id: str
 
 
+def require_admin_key(request: Request) -> None:
+    # A single shared secret, not real per-user auth — see the ADMIN_API_KEY
+    # comment in config.py for what this does and doesn't protect against.
+    # compare_digest instead of != : a naive string comparison short-circuits
+    # on the first mismatched byte, so response time leaks how many leading
+    # characters of the guess were correct — a timing side-channel.
+    if not secrets.compare_digest(request.headers.get("X-Admin-Key", ""), settings.ADMIN_API_KEY):
+        raise HTTPException(401, "Missing or invalid admin key")
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -278,7 +288,7 @@ def get_user_logins(
 # ---- Admin / demo endpoints ----
 
 @app.post("/api/admin/simulate-swap")
-def simulate_swap(user_id: int, db: Session = Depends(get_db)):
+def simulate_swap(user_id: int, db: Session = Depends(get_db), _: None = Depends(require_admin_key)):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -288,7 +298,7 @@ def simulate_swap(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/admin/reset-swap")
-def reset_swap(user_id: int, db: Session = Depends(get_db)):
+def reset_swap(user_id: int, db: Session = Depends(get_db), _: None = Depends(require_admin_key)):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -298,7 +308,7 @@ def reset_swap(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/admin/fraud-logs")
-def fraud_logs(db: Session = Depends(get_db)):
+def fraud_logs(db: Session = Depends(get_db), _: None = Depends(require_admin_key)):
     rows = db.query(LoginAttempt).order_by(LoginAttempt.created_at.desc()).limit(50).all()
     return [
         {
@@ -309,7 +319,7 @@ def fraud_logs(db: Session = Depends(get_db)):
 
 
 @app.get("/api/admin/users")
-def admin_users(db: Session = Depends(get_db)):
+def admin_users(db: Session = Depends(get_db), _: None = Depends(require_admin_key)):
     rows = db.query(User).order_by(User.id).all()
     return [
         {
@@ -321,7 +331,7 @@ def admin_users(db: Session = Depends(get_db)):
 
 
 @app.get("/api/admin/stats")
-def admin_stats(db: Session = Depends(get_db)):
+def admin_stats(db: Session = Depends(get_db), _: None = Depends(require_admin_key)):
     since = datetime.utcnow() - timedelta(hours=24)
     counts = dict(
         db.query(LoginAttempt.action, func.count(LoginAttempt.id))
@@ -336,7 +346,7 @@ def admin_stats(db: Session = Depends(get_db)):
 
 
 @app.get("/api/admin/model-meta")
-def model_meta():
+def model_meta(_: None = Depends(require_admin_key)):
     return risk_engine.meta
 
 

@@ -33,5 +33,12 @@ class Settings:
     MAX_FAILED_ATTEMPTS: int = 5
     LOCKOUT_MINUTES: int = 15
 
+    # Shared secret gating /api/admin/* (see main.py's require_admin_key).
+    # This is a single shared secret, not per-user role-based auth — it only
+    # stops unauthenticated discovery of the admin API. The default below is
+    # for local dev only and is NOT a secret; it MUST be overridden via the
+    # ADMIN_API_KEY environment variable before any real deployment.
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "dev-admin-key-change-me")
+
 
 settings = Settings()

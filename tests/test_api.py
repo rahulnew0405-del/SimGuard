@@ -37,6 +37,7 @@ from models import Base, User, Transaction, FraudAlert, LoginAttempt, PendingOtp
 
 DEVICE = "device-1"
 CREDS = {"email": "alice@example.com", "phone": "9876543210", "password": "s3cretpass"}
+ADMIN_HEADERS = {"X-Admin-Key": main.settings.ADMIN_API_KEY}
 
 
 @pytest.fixture
@@ -215,7 +216,7 @@ def test_login_locks_after_five_failures(env):
 def test_login_blocked_when_sim_recently_swapped(env):
     client, Session = env
     uid = _register(client).json()["user_id"]
-    assert client.post(f"/api/admin/simulate-swap?user_id={uid}").status_code == 200
+    assert client.post(f"/api/admin/simulate-swap?user_id={uid}", headers=ADMIN_HEADERS).status_code == 200
 
     r = _login(client)
     assert r.status_code == 403
@@ -333,6 +334,30 @@ def test_get_other_users_logins_is_forbidden(env):
 
 # ------------------------------------------------------------------- admin
 
+# Purpose: every /api/admin/* route requires the shared X-Admin-Key header —
+# no header (or a wrong one) is rejected with 401 and the right key succeeds,
+# for each admin route individually.
+ADMIN_ROUTES = [
+    ("post", "/api/admin/simulate-swap?user_id=1"),
+    ("post", "/api/admin/reset-swap?user_id=1"),
+    ("get", "/api/admin/fraud-logs"),
+    ("get", "/api/admin/users"),
+    ("get", "/api/admin/stats"),
+    ("get", "/api/admin/model-meta"),
+]
+
+
+@pytest.mark.parametrize("method,path", ADMIN_ROUTES)
+def test_admin_route_requires_admin_key(env, method, path):
+    client, _ = env
+    _register(client)  # so user_id=1 exists for the swap routes
+    call = getattr(client, method)
+
+    assert call(path).status_code == 401  # no header
+    assert call(path, headers={"X-Admin-Key": "wrong-key"}).status_code == 401
+    assert call(path, headers=ADMIN_HEADERS).status_code == 200
+
+
 # Purpose: GET /api/admin/users lists every user with exactly the safe fields,
 # exposes sim_swapped as a bool (not the raw timestamp), and never leaks
 # password_hash.
@@ -340,9 +365,9 @@ def test_admin_users_lists_safe_fields_only(env):
     client, Session = env
     uid_a = _register(client).json()["user_id"]
     _register(client, email="bob@example.com", phone="1112223334")
-    client.post(f"/api/admin/simulate-swap?user_id={uid_a}")
+    client.post(f"/api/admin/simulate-swap?user_id={uid_a}", headers=ADMIN_HEADERS)
 
-    r = client.get("/api/admin/users")
+    r = client.get("/api/admin/users", headers=ADMIN_HEADERS)
     assert r.status_code == 200
     rows = r.json()
     assert [u["email"] for u in rows] == [CREDS["email"], "bob@example.com"]
@@ -357,7 +382,7 @@ def test_admin_users_lists_safe_fields_only(env):
 # includes all three action keys so the UI never has to guard for missing ones.
 def test_admin_stats_empty(env):
     client, _ = env
-    r = client.get("/api/admin/stats")
+    r = client.get("/api/admin/stats", headers=ADMIN_HEADERS)
     assert r.status_code == 200
     assert r.json() == {
         "logins_last_24h": {"ALLOW": 0, "CHALLENGE": 0, "BLOCK": 0},
@@ -387,7 +412,7 @@ def test_admin_stats_counts_recent_attempts_users_and_alerts(env):
     db.commit()
     db.close()
 
-    assert client.get("/api/admin/stats").json() == {
+    assert client.get("/api/admin/stats", headers=ADMIN_HEADERS).json() == {
         "logins_last_24h": {"ALLOW": 2, "CHALLENGE": 1, "BLOCK": 1},
         "total_users": 2,
         "fraud_alerts_total": 2,
@@ -549,7 +574,7 @@ def test_verify_otp_bad_format_keeps_token_usable(env, monkeypatch):
 def test_blocked_login_creates_no_otp_token(env):
     client, Session = env
     uid = _register(client).json()["user_id"]
-    client.post(f"/api/admin/simulate-swap?user_id={uid}")
+    client.post(f"/api/admin/simulate-swap?user_id={uid}", headers=ADMIN_HEADERS)
     r = _login(client)
     assert r.status_code == 403
     assert "otp_token" not in r.text

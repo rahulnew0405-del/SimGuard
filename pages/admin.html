@@ -50,22 +50,44 @@
 </div>
 
 <script>
+// Every /api/admin/* route requires this shared secret in the X-Admin-Key
+// header. Prompted once per browser session and cached in sessionStorage.
+function getAdminKey() {
+  let key = sessionStorage.getItem('simguard_admin_key');
+  if (!key) {
+    key = prompt('Enter admin key:') || '';
+    sessionStorage.setItem('simguard_admin_key', key);
+  }
+  return key;
+}
+
+async function adminFetch(url, opts = {}) {
+  const withKey = (k) => ({ ...opts, headers: { ...(opts.headers || {}), 'X-Admin-Key': k } });
+  let res = await fetch(url, withKey(getAdminKey()));
+  if (res.status === 401) {
+    // Stale or wrong key: forget it, re-prompt, and retry once.
+    sessionStorage.removeItem('simguard_admin_key');
+    res = await fetch(url, withKey(getAdminKey()));
+  }
+  return res;
+}
+
 async function simulate() {
   const uid = document.getElementById('uid').value;
-  const res = await fetch(`/api/admin/simulate-swap?user_id=${uid}`, { method: 'POST' });
+  const res = await adminFetch(`/api/admin/simulate-swap?user_id=${uid}`, { method: 'POST' });
   const data = await res.json();
   document.getElementById('simResult').textContent = data.message || JSON.stringify(data);
   loadLogs();
 }
 async function reset() {
   const uid = document.getElementById('uid').value;
-  const res = await fetch(`/api/admin/reset-swap?user_id=${uid}`, { method: 'POST' });
+  const res = await adminFetch(`/api/admin/reset-swap?user_id=${uid}`, { method: 'POST' });
   const data = await res.json();
   document.getElementById('simResult').textContent = data.message || JSON.stringify(data);
   loadLogs();
 }
 async function loadLogs() {
-  const res = await fetch('/api/admin/fraud-logs');
+  const res = await adminFetch('/api/admin/fraud-logs');
   const rows = await res.json();
   const tbody = document.querySelector('#logsTable tbody');
   tbody.innerHTML = rows.map(r => `
@@ -79,7 +101,7 @@ async function loadLogs() {
     </tr>`).join('');
 }
 async function loadMeta() {
-  const res = await fetch('/api/admin/model-meta');
+  const res = await adminFetch('/api/admin/model-meta');
   const meta = await res.json();
   document.getElementById('modelMeta').innerHTML =
     `Model: ${meta.model} · Test AUC: ${meta.test_auc} · CV AUC: ${meta.cv_auc_mean} (&plusmn;${meta.cv_auc_std}) · Precision: ${meta.precision} · Recall: ${meta.recall} · F1: ${meta.f1}`;

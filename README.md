@@ -163,13 +163,19 @@ Read from `main.py`:
 | POST | `/api/transfer` | JWT | body: `amount`, `device_id`; rate limit 10/min |
 | GET | `/api/user/{user_id}` | JWT, own id only | returns `email`, `balance`; `403` for another user's id |
 | GET | `/api/user/{user_id}/logins` | JWT, own id only | that user's 20 most recent login attempts |
-| POST | `/api/admin/simulate-swap` | none | query: `user_id`; marks the SIM as just swapped |
-| POST | `/api/admin/reset-swap` | none | query: `user_id` |
-| GET | `/api/admin/fraud-logs` | none | 50 most recent login attempts, all users |
-| GET | `/api/admin/users` | none | all users (no password hash) |
-| GET | `/api/admin/stats` | none | login counts by action (24h), total users, total fraud alerts |
-| GET | `/api/admin/model-meta` | none | contents of `ml/model_meta.json` |
+| POST | `/api/admin/simulate-swap` | `X-Admin-Key` | query: `user_id`; marks the SIM as just swapped |
+| POST | `/api/admin/reset-swap` | `X-Admin-Key` | query: `user_id` |
+| GET | `/api/admin/fraud-logs` | `X-Admin-Key` | 50 most recent login attempts, all users |
+| GET | `/api/admin/users` | `X-Admin-Key` | all users (no password hash) |
+| GET | `/api/admin/stats` | `X-Admin-Key` | login counts by action (24h), total users, total fraud alerts |
+| GET | `/api/admin/model-meta` | `X-Admin-Key` | contents of `ml/model_meta.json` |
 | GET | `/api/health` | none | `{"status": "ok"}` |
+
+Every `/api/admin/*` route requires an `X-Admin-Key` header matching
+`settings.ADMIN_API_KEY` (`config.py`, env var `ADMIN_API_KEY`); a missing or
+wrong key gets `401`. `pages/admin.html` prompts for the key once per browser
+session, caches it in `sessionStorage`, and re-prompts if a call comes back
+`401`.
 
 FastAPI's interactive API docs (Swagger UI) are served at `/docs`.
 
@@ -187,16 +193,21 @@ exempt from the CSP, because Swagger UI loads from a CDN.
 pytest tests/ -v
 ```
 
-There are currently **51 tests** (they all pass at the time of writing):
+There are currently **57 tests** (they all pass at the time of writing):
 password hashing, JWT tampering, account lockout, the register / login /
 OTP / transfer / user / admin API routes, the risk rules, and the carrier
 client's guard clause. API tests use an in-memory SQLite database per test.
 
 ## Known limitations
 
-- **All `/api/admin/*` routes are unauthenticated by design** (demo scope).
-  They expose every user's email, phone and balance and can trigger a SIM
-  swap. Don't deploy this as-is.
+- **`/api/admin/*` routes require a shared `X-Admin-Key` header** (see above),
+  not real role-based auth. It's one secret shared by anyone who needs the
+  admin panel — there's no per-admin identity, no audit trail of *who* acted,
+  and no way to revoke one admin's access without changing the key for
+  everyone. It stops unauthenticated discovery of the routes, but not someone
+  with access to the browser session itself: the key sits in `sessionStorage`
+  in plaintext, so anyone with dev-tools access to that tab, or an XSS bug
+  elsewhere on the page, can read it. Don't deploy this as-is.
 - **The OTP value is a demo, but the OTP step is tied to a real login.**
   `/api/verify-otp` requires the single-use `otp_token` that only a successful
   password + risk check landing CHALLENGE (never ALLOW or BLOCK) can obtain,
