@@ -10,9 +10,9 @@ SIMULATED IP-to-location lookup + Haversine distance, for the geo-velocity
 *** with a real GeoIP provider; the rest of the pipeline wouldn't change.
 
 The Haversine great-circle distance is the standard approach used in
-location-based SIM-swap / account-takeover detection (your team's literature
-review reference R8, Cheruyot et al.); this module doesn't depend on that
-paper's content beyond using the formula.
+location-based SIM-swap / account-takeover detection (per the team's
+literature review reference R8, Cheruyot et al.); this module doesn't
+depend on that paper's content beyond using the formula.
 """
 import math
 from typing import Optional, Tuple

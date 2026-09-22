@@ -1,17 +1,16 @@
 """
 Trains the fraud-scoring model.
 
-IMPORTANT — read this before claiming any number from this script in an
-interview:
+IMPORTANT — context for any number quoted from this script:
 
 The original reference version of this idea generated fraud rows with
 `hours_since_sim_swap > 0` for every single fraud case and `-1` for every
 single legitimate case. That means the label is directly encoded in one
 input feature — the model doesn't learn a pattern, it learns "if this
 column is not -1, output fraud." That's why it scored AUC = 1.0: perfect
-scores on synthetic data are a symptom of data leakage, not a good model.
-An interviewer who has trained any model at all will ask about that number
-immediately.
+scores on synthetic data are a symptom of data leakage, not a good model,
+and it wouldn't hold up to scrutiny from anyone who has trained a model
+before.
 
 This version fixes it two ways:
   1. A minority of LEGITIMATE users also have a past (harmless) SIM swap —
@@ -123,8 +122,8 @@ def train():
         class_weight="balanced", random_state=SEED,
     )
 
-    # 5-fold cross-validation on the training set — this is the number to
-    # quote as "how I validated the model", not just a single test split.
+    # 5-fold cross-validation on the training set — this is the model's real
+    # validation metric, not just a single test split.
     cv_scores = cross_val_score(model, X_train_s, y_train, cv=5, scoring="roc_auc")
     print(f"5-fold CV ROC-AUC: {cv_scores.mean():.4f} (+/- {cv_scores.std():.4f})")
 

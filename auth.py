@@ -1,10 +1,10 @@
 """
 Password hashing + JWT issuing/verification + account lockout.
 
-Why bcrypt, if asked:
+Why bcrypt:
   bcrypt is a "slow" hash function by design (it has a configurable work
   factor / cost). A fast hash like plain SHA-256 lets an attacker who steals
-  your password-hash table try billions of guesses per second on a GPU.
+  the password-hash table try billions of guesses per second on a GPU.
   bcrypt also auto-generates a random salt per password, so two users with
   the same password get completely different hashes — this defeats rainbow
   table attacks.

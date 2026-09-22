@@ -1,8 +1,8 @@
 """
 FastAPI app — every HTTP route lives here. Kept deliberately flat (one file)
 since the project is small; a bigger app would split this into routers, but
-you should be able to say *why* it's flat here rather than pretend it needs
-to be.
+the flat layout here is a deliberate scope decision, not a shortcut that
+outgrew itself.
 """
 import random
 import secrets
