@@ -146,6 +146,13 @@ async function doLogin() {
   }
 
   if (res.ok) {
+    if (data.access_token) {
+      // ALLOW: the server already issued a JWT, no OTP step needed.
+      localStorage.setItem('simguard_token', data.access_token);
+      localStorage.setItem('simguard_user_id', String(data.user_id));
+      window.location.href = '/static/dashboard.html';
+      return;
+    }
     el.style.background = '#14532d';
     el.innerHTML = `Risk score: <b>${risk.score}</b> (${risk.level}) — ${risk.action}. Enter the OTP to continue.
       <div class="flags">Flags: ${risk.flags.join(', ') || 'none'}</div>`;

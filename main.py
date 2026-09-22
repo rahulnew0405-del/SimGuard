@@ -176,8 +176,17 @@ def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(403, {"message": "Login blocked", "risk": result})
 
-    # Only reached for ALLOW / CHALLENGE. The opaque token is the only way to
-    # get to /api/verify-otp; the client never gets to name a user_id there.
+    if result["action"] == "ALLOW":
+        # Low risk: skip the OTP step entirely and issue the JWT now.
+        db.commit()
+        access_token = create_access_token({"sub": str(user.id)})
+        return {
+            "message": "Login allowed", "risk": result,
+            "access_token": access_token, "token_type": "bearer", "user_id": user.id,
+        }
+
+    # CHALLENGE. The opaque token is the only way to get to /api/verify-otp;
+    # the client never gets to name a user_id there.
     otp_token = secrets.token_urlsafe(32)
     db.add(PendingOtp(
         user_id=user.id, token=otp_token,

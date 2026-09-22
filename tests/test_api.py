@@ -79,6 +79,17 @@ def _login(client, password=CREDS["password"], email=CREDS["email"]):
     )
 
 
+# Forces risk_engine.assess() to a fixed result, so a test doesn't depend on
+# what the real ML model happens to score a given scenario (login always
+# passes amount=0, and rule points alone don't reliably land in one bucket).
+def _mock_risk(monkeypatch, action, score=None, level=None, flags=None):
+    score = score if score is not None else {"ALLOW": 10, "CHALLENGE": 50, "BLOCK": 90}[action]
+    level = level or {"ALLOW": "LOW", "CHALLENGE": "MEDIUM", "BLOCK": "HIGH"}[action]
+    fixed = {"score": score, "level": level, "action": action, "flags": flags or [], "ml_prob": 0.0}
+    monkeypatch.setattr(main.risk_engine, "assess", lambda *a, **kw: fixed)
+    return fixed
+
+
 # --------------------------------------------------------------- register
 
 # Purpose: registering a valid user succeeds and the password is stored as a
@@ -115,16 +126,62 @@ def test_register_validation_errors(env):
 # ------------------------------------------------------------------ login
 
 # Purpose: correct credentials pass the password check and reach the risk
-# engine; a fresh user on a new device is not blocked, so we get the
-# "OTP required" response with a risk assessment.
+# engine; a fresh user on a new device is not blocked, so login succeeds and
+# returns a response consistent with whichever action the (real, unmocked)
+# risk engine landed on. The ALLOW/CHALLENGE branches themselves are covered
+# explicitly, with a mocked risk result, below.
 def test_login_success(env):
     client, _ = env
     _register(client)
     r = _login(client)
     assert r.status_code == 200
     body = r.json()
+    action = body["risk"]["action"]
+    assert action in ("ALLOW", "CHALLENGE")
+    if action == "ALLOW":
+        assert body["message"] == "Login allowed"
+        assert "access_token" in body and "otp_token" not in body
+    else:
+        assert body["message"] == "Risk-assessed, OTP required"
+        assert "otp_token" in body and "access_token" not in body
+
+
+# Purpose: an ALLOW result skips the OTP step entirely — login returns a JWT
+# directly (usable on a protected route immediately), no otp_token, and no
+# PendingOtp row is created.
+def test_login_allow_issues_jwt_directly(env, monkeypatch):
+    client, Session = env
+    _register(client)
+    _mock_risk(monkeypatch, "ALLOW")
+
+    r = _login(client)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["message"] == "Login allowed"
+    assert body["risk"]["action"] == "ALLOW"
+    assert body["token_type"] == "bearer"
+    assert "otp_token" not in body
+
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+    assert client.get(f"/api/user/{body['user_id']}", headers=headers).status_code == 200
+    assert Session().query(PendingOtp).count() == 0
+
+
+# Purpose: a CHALLENGE result keeps today's behavior exactly — an otp_token
+# is returned and no JWT is issued until /api/verify-otp succeeds.
+def test_login_challenge_creates_otp_token(env, monkeypatch):
+    client, Session = env
+    _register(client)
+    _mock_risk(monkeypatch, "CHALLENGE")
+
+    r = _login(client)
+    assert r.status_code == 200
+    body = r.json()
     assert body["message"] == "Risk-assessed, OTP required"
-    assert body["risk"]["action"] in ("ALLOW", "CHALLENGE")
+    assert body["risk"]["action"] == "CHALLENGE"
+    assert len(body["otp_token"]) >= 32
+    assert "access_token" not in body
+    assert Session().query(PendingOtp).count() == 1
 
 
 # Purpose: wrong password and unknown email both return the same generic 401
@@ -339,7 +396,8 @@ def test_admin_stats_counts_recent_attempts_users_and_alerts(env):
 
 # -------------------------------------------------------------------- OTP
 
-def _login_for_otp_token(client):
+def _login_for_otp_token(client, monkeypatch):
+    _mock_risk(monkeypatch, "CHALLENGE")
     r = _login(client)
     assert r.status_code == 200
     return r.json()["otp_token"]
@@ -352,9 +410,10 @@ def _verify(client, token, otp="123456"):
 # Purpose: login (ALLOW/CHALLENGE) returns an opaque otp_token and does NOT
 # expose user_id; presenting that token with a 6-digit OTP succeeds and yields
 # a working JWT for the right user, plus the user_id the dashboard needs.
-def test_verify_otp_with_valid_token_succeeds(env):
+def test_verify_otp_with_valid_token_succeeds(env, monkeypatch):
     client, _ = env
     uid = _register(client).json()["user_id"]
+    _mock_risk(monkeypatch, "CHALLENGE")
     body = _login(client).json()
     assert "user_id" not in body
     assert len(body["otp_token"]) >= 32
@@ -369,10 +428,10 @@ def test_verify_otp_with_valid_token_succeeds(env):
 
 # Purpose: tokens are single-use — the first verify succeeds, and reusing the
 # same token afterwards fails with 401.
-def test_verify_otp_token_is_single_use(env):
+def test_verify_otp_token_is_single_use(env, monkeypatch):
     client, _ = env
     _register(client)
-    token = _login_for_otp_token(client)
+    token = _login_for_otp_token(client, monkeypatch)
     assert _verify(client, token).status_code == 200
     assert _verify(client, token).status_code == 401
 
@@ -388,10 +447,10 @@ def test_verify_otp_unknown_token_rejected(env):
 # Purpose: an expired token is rejected (401) even with a well-formed OTP,
 # and the stale record is cleaned up. Expiry is simulated by backdating
 # expires_at in the DB.
-def test_verify_otp_expired_token_rejected(env):
+def test_verify_otp_expired_token_rejected(env, monkeypatch):
     client, Session = env
     _register(client)
-    token = _login_for_otp_token(client)
+    token = _login_for_otp_token(client, monkeypatch)
 
     db = Session()
     db.query(PendingOtp).filter_by(token=token).one().expires_at = (
@@ -476,10 +535,10 @@ def test_verify_otp_old_user_id_pattern_no_longer_works(env):
 
 # Purpose: a malformed OTP is a 400 that does NOT burn the token, so the user
 # can retry the OTP; the token is consumed only on success.
-def test_verify_otp_bad_format_keeps_token_usable(env):
+def test_verify_otp_bad_format_keeps_token_usable(env, monkeypatch):
     client, _ = env
     _register(client)
-    token = _login_for_otp_token(client)
+    token = _login_for_otp_token(client, monkeypatch)
     assert _verify(client, token, otp="abc").status_code == 400
     assert _verify(client, token, otp="12345").status_code == 400
     assert _verify(client, token).status_code == 200

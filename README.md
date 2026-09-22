@@ -23,23 +23,26 @@ the risk engine react.
    - Correct password: the risk engine scores the attempt (SIM-swap recency,
      device, IP, failed attempts, plus an ML score).
    - **BLOCK** (score >= 70): `403`, a `FraudAlert` is recorded.
-   - **ALLOW** (score < 35) or **CHALLENGE** (35-69): `200`, "OTP required",
-     with the risk result and a single-use, opaque `otp_token` (valid for 5
-     minutes). The response does not include the user's id.
-3. **Verify OTP** (`POST /api/verify-otp`, query: `token`, `otp`) - looks up
-   the `otp_token` from step 2; a missing or expired token is rejected with
-   `401`. On success the token is deleted (single use) and a JWT
-   (60-minute expiry) is issued along with the `user_id`. The OTP value itself
-   is a demo: any 6-digit code is accepted. A malformed OTP returns `400` and
-   leaves the token usable.
+   - **ALLOW** (score < 35): `200`, "Login allowed" — a JWT (60-minute
+     expiry) is issued immediately, along with the `user_id`. No OTP step.
+   - **CHALLENGE** (35-69): `200`, "Risk-assessed, OTP required" — the risk
+     result and a single-use, opaque `otp_token` (valid for 5 minutes) are
+     returned instead of a JWT. The response does not include the user's id.
+3. **Verify OTP** (`POST /api/verify-otp`, query: `token`, `otp`) - only
+   reached after a CHALLENGE login. Looks up the `otp_token` from step 2; a
+   missing or expired token is rejected with `401`. On success the token is
+   deleted (single use) and a JWT (60-minute expiry) is issued along with the
+   `user_id`. The OTP value itself is a demo: any 6-digit code is accepted. A
+   malformed OTP returns `400` and leaves the token usable.
 4. **Transfer** (`POST /api/transfer`, JWT required) - the engine scores the
    transfer including the amount. **BLOCK** returns `403` and records a
    `blocked` transaction plus a `FraudAlert`. Otherwise the transfer completes
    and the balance is debited.
 
-Note: the server currently treats **ALLOW and CHALLENGE identically** for both
-login and transfer. The action is returned and logged, but CHALLENGE does not
-add an extra verification step. Only BLOCK changes behavior.
+Note: **transfer** still treats ALLOW and CHALLENGE identically — the action
+is returned and logged, but only BLOCK changes behavior there. **Login** now
+branches on the action: ALLOW skips straight to a JWT, CHALLENGE requires the
+OTP step (see above).
 
 ## Tech stack
 
@@ -155,8 +158,8 @@ Read from `main.py`:
 | GET | `/` | none | serves `pages/login.html` |
 | GET | `/static/*` | none | serves `pages/` (`login.html`, `dashboard.html`, `admin.html`) |
 | POST | `/api/register` | none | body: `email`, `phone`, `password`; rate limit 5/min |
-| POST | `/api/login` | none | body: `email`, `password`, `device_id`; rate limit 10/min; returns `otp_token` |
-| POST | `/api/verify-otp` | `otp_token` | query: `token`, `otp` (demo: any 6 digits); rate limit 10/min; returns a JWT and `user_id` |
+| POST | `/api/login` | none | body: `email`, `password`, `device_id`; rate limit 10/min; ALLOW returns a JWT + `user_id` directly, CHALLENGE returns `otp_token` |
+| POST | `/api/verify-otp` | `otp_token` | query: `token`, `otp` (demo: any 6 digits); rate limit 10/min; only reachable after a CHALLENGE login; returns a JWT and `user_id` |
 | POST | `/api/transfer` | JWT | body: `amount`, `device_id`; rate limit 10/min |
 | GET | `/api/user/{user_id}` | JWT, own id only | returns `email`, `balance`; `403` for another user's id |
 | GET | `/api/user/{user_id}/logins` | JWT, own id only | that user's 20 most recent login attempts |
@@ -184,7 +187,7 @@ exempt from the CSP, because Swagger UI loads from a CDN.
 pytest tests/ -v
 ```
 
-There are currently **49 tests** (they all pass at the time of writing):
+There are currently **51 tests** (they all pass at the time of writing):
 password hashing, JWT tampering, account lockout, the register / login /
 OTP / transfer / user / admin API routes, the risk rules, and the carrier
 client's guard clause. API tests use an in-memory SQLite database per test.
@@ -196,13 +199,14 @@ client's guard clause. API tests use an in-memory SQLite database per test.
   swap. Don't deploy this as-is.
 - **The OTP value is a demo, but the OTP step is tied to a real login.**
   `/api/verify-otp` requires the single-use `otp_token` that only a successful
-  password + risk check (ALLOW or CHALLENGE, never BLOCK) can obtain, so a JWT
-  can't be minted for an arbitrary `user_id`. Once you hold a valid token,
-  though, *any* 6-digit code passes, because no SMS is sent or checked. Tokens
-  that are never used are only removed when someone presents them after they
-  expire, so unused rows accumulate in the `pending_otps` table.
-- **CHALLENGE doesn't challenge.** ALLOW and CHALLENGE are handled the same by
-  the server (see the flow above).
+  password + risk check landing CHALLENGE (never ALLOW or BLOCK) can obtain,
+  so a JWT can't be minted for an arbitrary `user_id`. Once you hold a valid
+  token, though, *any* 6-digit code passes, because no SMS is sent or checked.
+  Tokens that are never used are only removed when someone presents them after
+  they expire, so unused rows accumulate in the `pending_otps` table.
+- **Transfer's CHALLENGE doesn't challenge.** Unlike login, `/api/transfer`
+  still handles ALLOW and CHALLENGE the same way — only BLOCK changes
+  behavior there.
 - **`JWT_SECRET` has a hardcoded development default** in `config.py`. Set it
   through the environment for anything beyond local use.
 - **`vonage_client.py` is architecture only.** It sketches what a carrier
