@@ -52,7 +52,7 @@ From `requirements.txt` (versions exactly as listed there):
 |---|---|
 | Web | fastapi==0.110.0, uvicorn==0.27.1, python-multipart==0.0.9 |
 | Database | sqlalchemy>=2.0.36 (SQLite by default) |
-| Auth | python-jose[cryptography]==3.3.0, passlib[bcrypt]==1.7.4, bcrypt<4.1 |
+| Auth | python-jose[cryptography]==3.4.0, passlib[bcrypt]==1.7.4, bcrypt<4.1 |
 | Validation | email-validator==2.3.0 (Pydantic `EmailStr`) |
 | Rate limiting | slowapi==0.1.9 |
 | ML | scikit-learn>=1.5.0, numpy>=1.26.0, pandas>=2.0.0, joblib==1.3.2 |
@@ -220,6 +220,24 @@ client's guard clause. API tests use an in-memory SQLite database per test.
   behavior there.
 - **`JWT_SECRET` has a hardcoded development default** in `config.py`. Set it
   through the environment for anything beyond local use.
+- **`python-jose` was audited and bumped to 3.4.0** (was 3.3.0), fixing
+  CVE-2024-33663 (algorithm confusion) and CVE-2024-33664 (JWE decompression
+  DoS). Verified with `pip-audit`: `python-jose` no longer appears in its
+  output, and the full test suite (57 tests) still passes against 3.4.0.
+  One residual: jose 3.4.0 itself pins `pyasn1<0.5.0`, so `pip install`
+  resolves to `pyasn1==0.4.8`, which carries known CVEs (PYSEC-2026-2263,
+  -3455, -3456, -3457) that are only fixed in `pyasn1>=0.6.3`. Pinning
+  `pyasn1>=0.6.3` directly was tried and rejected — it makes
+  `pip install -r requirements.txt` fail outright
+  (`ResolutionImpossible`) against jose's own declared bound. It's left
+  unpinned because this app only ever signs/verifies JWTs with HS256
+  (HMAC, see `auth.py`), a code path jose handles without touching pyasn1 at
+  all, so the outdated pyasn1 has no runtime effect here — but a `pip-audit`
+  run will keep flagging it until either jose relaxes that pin upstream or
+  this app moves off `python-jose`. `pip-audit` also surfaces pre-existing,
+  unrelated findings in `pip`, `pytest`, `python-dotenv`,
+  `python-multipart`, `starlette`, and `ecdsa` (tooling/transitive deps, not
+  touched by this change) — out of scope here but worth a follow-up pass.
 - **`vonage_client.py` is architecture only.** It sketches what a carrier
   SIM-swap lookup client would look like, but it is an unverified best-effort
   implementation of the expected request/response shape, has not been tested
